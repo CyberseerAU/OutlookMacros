@@ -1,0 +1,130 @@
+        ' Outlook Macro to Check for external email addresses and attachements and prompt you to confirm sending of email.
+Function CheckExternalEmailAndAttachmentCount() As Boolean
+
+    Const PR_ATTACH_CONTENT_ID As String = "http://schemas.microsoft.com/mapi/proptag/0x3712001F"
+    Const PR_ATTACHMENT_HIDDEN As String = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B"
+   
+    Dim currentItem As mailItem
+    Dim attachment As attachment
+    Dim propertyAccessor As propertyAccessor
+    Dim attachmentCount As Integer
+    Dim contentID As String
+    Dim bodyText As String
+
+    On Error GoTo ErrorHandler
+
+    attachmentCount = 0
+    Set currentItem = Application.ActiveInspector.currentItem
+    bodyText = currentItem.HTMLBody
+
+    For Each attachment In currentItem.Attachments
+        Set propertyAccessor = attachment.propertyAccessor
+        contentID = propertyAccessor.GetProperty(PR_ATTACH_CONTENT_ID)
+
+        If Len(contentID) > 0 Then
+            If InStr(bodyText, contentID) = 0 Then
+                On Error Resume Next
+                If Not propertyAccessor.GetProperty(PR_ATTACHMENT_HIDDEN) Then
+                    attachmentCount = attachmentCount + 1
+                End If
+                On Error GoTo 0
+            End If
+        Else
+            attachmentCount = attachmentCount + 1
+        End If
+    Next attachment
+
+    If attachmentCount > 0 Then
+        CheckExternalEmailAndAttachmentCount = True
+    Else
+        CheckExternalEmailAndAttachmentCount = False
+    End If
+
+    Exit Function
+
+ErrorHandler:
+    CheckExternalEmailAndAttachmentCount = False
+End Function
+
+Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
+
+    Dim recipients As Outlook.recipients
+    Dim recipient As Outlook.recipient
+    Dim propertyAccessor As Outlook.propertyAccessor
+    Dim promptMessage As String
+    Dim externalRecipients As Boolean
+    Dim recipientCount As Integer
+    Dim PR_SMTP_ADDRESS As String
+    Dim colMatches As Object
+    Dim objRegEx As Object
+    Dim mailItem As mailItem
+    Dim recipientAddress As String
+
+    PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
+
+    On Error GoTo ErrorHandler
+
+    If TypeOf Item Is mailItem Then
+        Set mailItem = Item
+        Set recipients = mailItem.recipients
+
+        For i = recipients.Count To 1 Step -1
+            recipientAddress = recipients.Item(i).Address
+           ' CHANGE EMAIL TO YOUR DOMAIN BELOW
+            If InStr(LCase(recipientAddress), "test.com") <= 0 Then
+                Exit For
+            Else
+                Cancel = False
+            End If
+        Next i
+        ' CHANGE EMAIL TO YOUR DOMAIN BELOW
+        If InStr(LCase(recipientAddress), "@ptest.com") <= 0 Then
+            promptMessage = "Are you sure to send this email to outside organization? "
+            isWarning = MsgBox(promptMessage, vbYesNo + vbQuestion, "Confirm Email to Outside Organization")
+            If isWarning = vbNo Then
+                Cancel = True
+            End If
+        End If
+
+        externalRecipients = False
+        Set objRegEx = CreateObject("VBscript.RegExp")
+        Set colMatches = objRegEx.Execute(Item.body)
+
+        For Each recipient In recipients
+            Set propertyAccessor = recipient.propertyAccessor
+            ' CHANGE EMAIL TO YOUR DOMAIN BELOW
+            If InStr(LCase(propertyAccessor.GetProperty(PR_SMTP_ADDRESS)), "@test.com") = 0 Then
+                externalRecipients = True
+                If recipient.Type = Outlook.OlMailRecipientType.olTo Or recipient.Type = Outlook.OlMailRecipientType.olCC Then
+                    recipientCount = recipientCount + 1
+                End If
+            End If
+        Next recipient
+
+        If externalRecipients = True And CheckExternalEmailAndAttachmentCount() = True Then
+            prompt = "You are about to send an attachment to an external recipient" & vbNewLine & vbNewLine & "Have you checked it is the right attachment, and that it only" & vbNewLine & "contains information that should be sent?"
+            If MsgBox(prompt, vbYesNo + vbExclamation + vbMsgBoxSetForeground + vbDefaultButton2, "Check Attachment") = vbNo Then
+                Cancel = True
+                Exit Sub
+            End If
+        End If
+
+        If externalRecipients = True And recipientCount >= 5 Then
+            prompt = "You are about to send an email with five or more external recipients" & vbNewLine & vbNewLine & "Have you checked if these recipients should be sent as Bcc instead?"
+            If MsgBox(prompt, vbYesNo + vbExclamation + vbMsgBoxSetForeground + vbDefaultButton2, "Check Recipients") = vbNo Then
+                Cancel = True
+            End If
+        End If
+    End If
+
+    Set olkAttachment = Nothing
+    Set colMatches = Nothing
+    Set objRegEx = Nothing
+
+    Exit Sub
+
+ErrorHandler:
+    If MsgBox("An error has occurred checking this email for attachments and recipients" & vbNewLine & vbNewLine & "Click OK if you wish to send the email without checking", vbExclamation + vbOKCancel + vbDefaultButton2, "Check Email") = vbCancel Then
+        Cancel = True
+    End If
+End Sub
